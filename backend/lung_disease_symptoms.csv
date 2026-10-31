@@ -1,0 +1,27 @@
+Disease,Symptom,Weight (%)
+Pneumonia,Fever,90
+Pneumonia,Cough with mucus,85
+Pneumonia,Chest pain,75
+Pneumonia,Shortness of breath,75
+Pneumothorax,Sudden sharp chest pain,90
+Pneumothorax,Shortness of breath,85
+Pneumothorax,Rapid breathing,75
+Pneumothorax,Cyanosis,45
+Congenital Lobar Emphysema,Fast breathing,85
+Congenital Lobar Emphysema,Difficulty feeding,70
+Congenital Lobar Emphysema,Cyanosis,65
+Congenital Lobar Emphysema,Wheezing,55
+Haemothorax,Chest pain,90
+Haemothorax,Breathing difficulty,85
+Haemothorax,Rapid heart rate,75
+Haemothorax,Signs of shock,65
+Atelectasis,Sudden breathlessness,85
+Atelectasis,Chest pain,75
+Atelectasis,Cough,65
+Pulmonary Edema,Shortness of breath,93
+Pulmonary Edema,Pink/frothy cough,85
+Pulmonary Edema,Drowning sensation,83
+Pulmonary Edema,Wheezing/gasping,75
+Pulmonary Edema,Swelling in legs/feet,65
+Pulmonary Edema,Fatigue,55
+Pulmonary Edema,Fast heartbeat,55

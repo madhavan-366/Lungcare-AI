@@ -1,0 +1,14 @@
+fastapi==0.111.0
+uvicorn==0.30.0
+firebase-admin==6.5.0
+torch==2.3.1
+torchvision==0.18.1
+torchxrayvision==1.2.3
+pandas==2.2.2
+numpy==1.26.4
+opencv-python-headless==4.10.0.84
+python-multipart==0.0.9
+python-dotenv==1.0.1
+pillow==10.4.0
+torchcam==0.4.0
+pyjwt==2.8.0

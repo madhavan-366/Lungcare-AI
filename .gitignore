@@ -1,0 +1,77 @@
+# ----------------- PYTHON -----------------
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+backend/venv/
+
+# ----------------- JUPYTER -----------------
+.ipynb_checkpoints
+
+# ----------------- LOGS -----------------
+*.log
+
+# ----------------- ENV/SECRETS -----------------
+.env
+*.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.crt
+*serviceAccount*.json
+*service-account*.json
+*service_account*.json
+*client_secret*.json
+serviceAccountKey.json
+backend/serviceAccountKey.json
+credentials/
+secrets/
+*.secret.js
+*.secret.json
+*.local.json
+*credentials*.json
+*credentials*.js
+
+# ----------------- TWILIO-LIKE KEYS -----------------
+project/frontend/functions/functions/index.js
+project/frontend/functions/index.js
+
+# ----------------- EDITORS -----------------
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# ----------------- REACT / NODE -----------------
+node_modules/
+dist/
+build/
+.next/
+
+# ----------------- COVERAGE -----------------
+.coverage
+htmlcov/
+*.cover
+coverage.xml
+*.lcov
+
+# ----------------- AI/MODELS -----------------
+*.pt
+*.pth
+
+# ----------------- OTHER BINARIES -----------------
+*.out
+*.exe
+*.dll
+*.so
+*.lib
+
+# ----------------- FIREBASE -----------------
+.firebase/
