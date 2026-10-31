@@ -208,9 +208,10 @@ def determine_severity_and_recommendation(pred_scores: dict, is_pretrained: bool
 
 # Initialize Firebase Environment
 load_dotenv()
-firebase_project_id = os.getenv("FIREBASE_PROJECT_ID", "lungcare-ai-34de7").strip()
-storage_bucket_name = os.getenv("FIREBASE_STORAGE_BUCKET", f"{firebase_project_id}.firebasestorage.app").strip()
-service_account_path = os.getenv("FIREBASE_SERVICE_ACCOUNT_PATH", "./serviceAccountKey.json").strip()
+firebase_project_id = (os.getenv("FIREBASE_PROJECT_ID") or "lungcare-ai-34de7").strip()
+storage_bucket_name = (os.getenv("FIREBASE_STORAGE_BUCKET") or f"{firebase_project_id}.firebasestorage.app").strip()
+service_account_json_raw = os.getenv("FIREBASE_SERVICE_ACCOUNT_JSON")
+service_account_path = (os.getenv("FIREBASE_SERVICE_ACCOUNT_PATH") or "./serviceAccountKey.json").strip()
 
 # Resolve relative service account path safely if needed
 if service_account_path and not os.path.isabs(service_account_path):
@@ -221,39 +222,81 @@ if service_account_path and not os.path.isabs(service_account_path):
     elif os.path.exists(os.path.abspath(service_account_path)):
         service_account_path = os.path.abspath(service_account_path)
 
-# Check and initialize Firebase Admin SDK
+sa_data = None
 has_matching_service_account = False
-if service_account_path and os.path.exists(service_account_path):
-    try:
-        with open(service_account_path, "r") as sa_file:
-            sa_data = json.load(sa_file)
-        sa_project_id = sa_data.get("project_id")
-        if sa_project_id == firebase_project_id:
-            logger.info(f"Using verified service account for project: {firebase_project_id}")
-            has_matching_service_account = True
-        else:
-            logger.warning(
-                f"Service account file at '{service_account_path}' belongs to project '{sa_project_id}', "
-                f"which does NOT match target project '{firebase_project_id}'. "
-                f"Ignoring mismatched service account to prevent audience claim mismatch errors."
-            )
-    except Exception as sa_err:
-        logger.warning(f"Error inspecting service account file at '{service_account_path}': {sa_err}")
+cred = None
 
+# 1. Attempt to load service account credentials from FIREBASE_SERVICE_ACCOUNT_JSON (for Render deployment)
+if service_account_json_raw and service_account_json_raw.strip():
+    try:
+        parsed_data = json.loads(service_account_json_raw.strip())
+        if isinstance(parsed_data, dict):
+            sa_project_id = parsed_data.get("project_id")
+            if sa_project_id == firebase_project_id:
+                sa_data = parsed_data
+                has_matching_service_account = True
+                logger.info("Verified service account from FIREBASE_SERVICE_ACCOUNT_JSON for project: %s", firebase_project_id)
+            else:
+                logger.warning(
+                    "Service account in FIREBASE_SERVICE_ACCOUNT_JSON belongs to project '%s', "
+                    "which does NOT match target project '%s'. Ignoring mismatched credentials.",
+                    sa_project_id, firebase_project_id
+                )
+        else:
+            logger.error("FIREBASE_SERVICE_ACCOUNT_JSON does not contain a valid JSON object.")
+    except json.JSONDecodeError as json_err:
+        logger.error("Failed to parse FIREBASE_SERVICE_ACCOUNT_JSON: Invalid JSON format (%s).", str(json_err))
+    except Exception as sa_err:
+        logger.error("Error reading credentials from FIREBASE_SERVICE_ACCOUNT_JSON: %s", str(sa_err))
+
+# 2. Fallback to local service account file for local development
+if not sa_data and service_account_path and os.path.exists(service_account_path):
+    try:
+        with open(service_account_path, "r", encoding="utf-8") as sa_file:
+            parsed_data = json.load(sa_file)
+        if isinstance(parsed_data, dict):
+            sa_project_id = parsed_data.get("project_id")
+            if sa_project_id == firebase_project_id:
+                sa_data = parsed_data
+                has_matching_service_account = True
+                logger.info("Using verified local service account file for project: %s", firebase_project_id)
+            else:
+                logger.warning(
+                    "Service account file at '%s' belongs to project '%s', "
+                    "which does NOT match target project '%s'. Ignoring mismatched service account.",
+                    service_account_path, sa_project_id, firebase_project_id
+                )
+        else:
+            logger.error("Local service account file at '%s' does not contain a valid JSON object.", service_account_path)
+    except json.JSONDecodeError as json_err:
+        logger.error("Failed to parse local service account file at '%s': Invalid JSON format (%s).", service_account_path, str(json_err))
+    except Exception as sa_err:
+        logger.warning("Error inspecting service account file at '%s': %s", service_account_path, str(sa_err))
+
+# 3. Create Firebase Certificate credentials if matching service account data was found
+if sa_data:
+    try:
+        cred = credentials.Certificate(sa_data)
+    except Exception as cred_err:
+        logger.error("Failed to create credentials from service account data: %s", str(cred_err))
+        cred = None
+        has_matching_service_account = False
+
+# 4. Initialize Firebase Admin SDK (single initialization check)
 try:
     if not firebase_admin._apps:
-        if has_matching_service_account:
-            cred = credentials.Certificate(service_account_path)
-            initialize_app(cred, {
-                'projectId': firebase_project_id,
-                'storageBucket': storage_bucket_name
-            })
+        app_options = {
+            'projectId': firebase_project_id,
+            'storageBucket': storage_bucket_name
+        }
+        if cred is not None:
+            initialize_app(cred, app_options)
+            logger.info("Firebase Admin initialized successfully with verified service account for project: %s", firebase_project_id)
         else:
-            logger.info(f"Initializing Firebase Admin with project ID: {firebase_project_id}")
-            initialize_app(options={
-                'projectId': firebase_project_id,
-                'storageBucket': storage_bucket_name
-            })
+            logger.info("Initializing Firebase Admin with project ID: %s (without service account certificate)", firebase_project_id)
+            initialize_app(options=app_options)
+    else:
+        logger.info("Firebase app already initialized.")
 except ValueError as e:
     logger.info("Firebase app already initialized: %s", str(e))
 except Exception as e:
