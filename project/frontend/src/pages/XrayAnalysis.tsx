@@ -3,7 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, collection, query, where, onSnapshot, doc, getDoc } from 'firebase/firestore';
 import { jsPDF } from 'jspdf';
-import axios from 'axios';
+import { apiClient, API_ENDPOINTS, getApiErrorMessage } from '../config/api';
 import {
   Upload,
   AlertCircle,
@@ -158,8 +158,7 @@ const XrayAnalysis: React.FC = () => {
       const formData = new FormData();
       formData.append('file', selectedFile);
       formData.append('user_id', user.id);
-      const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
-      return await axios.post(`${backendUrl}/analyze-xray`, formData, {
+      return await apiClient.post(API_ENDPOINTS.ANALYZE_XRAY, formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
           Authorization: `Bearer ${idToken}`,
@@ -183,11 +182,10 @@ const XrayAnalysis: React.FC = () => {
       setNotification('Radiographic analysis completed successfully!');
       setTimeout(() => setNotification(null), 5000);
     } catch (err: any) {
-      const errorDetail = err.response?.data?.detail || err.message || 'Unknown error occurred';
       if (err.response?.status === 401) {
         setError('Authentication failed: Your session may have expired. Please sign in again.');
       } else {
-        setError(`Failed to analyze X-ray: ${errorDetail}`);
+        setError(`Failed to analyze X-ray: ${getApiErrorMessage(err)}`);
       }
     } finally {
       clearInterval(interval);

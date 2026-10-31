@@ -23,4 +23,9 @@ dist-ssr
 *.sln
 *.sw?
 .env
+.env.local
+.env.*.local
+!.env.example
+!.env.development
+!.env.production
 project/frontend/functions/

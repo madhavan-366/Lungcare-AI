@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, collection, query, where, onSnapshot, doc, getDoc } from 'firebase/firestore';
-import axios from 'axios';
+import { apiClient, API_ENDPOINTS, getApiErrorMessage } from '../config/api';
 import { MessageSquare, Upload, Phone, AlertCircle, CheckCircle, Send, ArrowLeft } from 'lucide-react';
 import Navbar from '../components/Navbar';
 
@@ -96,8 +96,7 @@ const Consultation: React.FC = () => {
   const handleSendMessage = async () => {
     if (!selectedConsultation || !newMessage.trim()) return;
     try {
-      const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000';
-      await axios.post(`${backendUrl}/send-message`, {
+      await apiClient.post(API_ENDPOINTS.SEND_MESSAGE, {
         consultation_id: selectedConsultation.id,
         sender_id: user.id,
         receiver_id: user.role === 'doctor' ? selectedConsultation.patient_id : selectedConsultation.doctor_id,
@@ -108,7 +107,7 @@ const Consultation: React.FC = () => {
       setNotification('Message sent successfully!');
       setTimeout(() => setNotification(null), 4000);
     } catch (err: any) {
-      setError('Failed to send message: ' + (err.response?.data?.detail || err.message));
+      setError('Failed to send message: ' + getApiErrorMessage(err));
     }
   };
 
