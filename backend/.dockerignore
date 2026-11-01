@@ -4,6 +4,7 @@ __pycache__
 *.pyd
 .Python
 venv/
+.venv/
 env/
 .env
 *.env
@@ -14,8 +15,11 @@ serviceAccountKey.json
 *credential*.json
 *.pth
 *.pt
+models/
 models/*.pth
 models/*.pt
+backend/models/*.pth
+backend/models/*.pt
 .vscode
 .git
 .gitignore

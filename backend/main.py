@@ -1,10 +1,12 @@
 import os
+import gc
 import json
 import uuid
 import base64
 import logging
+import asyncio
 import urllib.parse
-from datetime import datetime
+from datetime import datetime, timezone
 from io import BytesIO
 from contextlib import asynccontextmanager
 
@@ -29,8 +31,19 @@ from dotenv import load_dotenv
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("lungcare-backend")
 
+# Optimize PyTorch CPU threads to bound memory allocation footprint in constrained environments (e.g. 512MB RAM)
+torch_threads = int(os.getenv("TORCH_NUM_THREADS", "1"))
+torch.set_num_threads(torch_threads)
+try:
+    torch.set_num_interop_threads(1)
+except Exception:
+    pass
+
 # Global state for cached AI models and datasets
 model_state = {}
+
+# Concurrency lock to serialize heavy X-ray inference and prevent simultaneous requests from causing excessive memory usage
+inference_lock = asyncio.Lock()
 
 # Target 14 LungCare Pathologies (fine-tuned NIH Chest X-ray dataset)
 TARGET_DISEASE_LABELS = [
@@ -562,15 +575,20 @@ async def custom_exception_handler(request: Request, exc: Exception):
 def transform_image(image_bytes):
     try:
         logger.info("Preprocessing image for TorchXRayVision")
-        image_pil_rgb = Image.open(image_bytes).convert("RGB")
-        image_gray = image_pil_rgb.convert("L").resize((224, 224))
+        with Image.open(image_bytes) as raw_img:
+            # Immediate resize to 224x224 avoids keeping massive uncompressed full-res bitmaps in memory
+            image_pil_rgb = raw_img.convert("RGB").resize((224, 224))
 
-        img_np = np.array(image_gray, dtype=np.float32)
+        image_gray = image_pil_rgb.convert("L")
+        img_np = np.asarray(image_gray, dtype=np.float32)
+
         # Normalization matching training: pixel_value / 255.0 * 2048.0 - 1024.0
         img_norm = (img_np / 255.0) * 2048.0 - 1024.0
 
         input_tensor = torch.from_numpy(img_norm).unsqueeze(0).unsqueeze(0).float()
         return input_tensor, image_pil_rgb
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Failed to preprocess image: %s", str(e))
         raise HTTPException(status_code=400, detail=f"Image preprocessing failed: {str(e)}")
@@ -581,7 +599,7 @@ def predict_diseases(model, input_tensor):
         logger.info("Predicting thoracic pathologies with TorchXRayVision DenseNet121")
         device = next(model.parameters()).device
         input_tensor = input_tensor.to(device)
-        with torch.no_grad():
+        with torch.inference_mode():
             output = model(input_tensor)
             # TorchXRayVision DenseNet.forward() applies sigmoid and op_norm when
             # op_threshs is configured (default for densenet121-res224-all), or applies
@@ -616,6 +634,7 @@ def predict_diseases(model, input_tensor):
 
 # Generate Grad-CAM Overlay
 def generate_gradcam_overlay(model, input_tensor, image_pil, target_disease):
+    cam_extractor = None
     try:
         xrv_target = XRV_LABEL_MAPPING.get(target_disease, target_disease)
         if xrv_target not in model.pathologies:
@@ -628,16 +647,23 @@ def generate_gradcam_overlay(model, input_tensor, image_pil, target_disease):
         device = next(model.parameters()).device
         input_tensor = input_tensor.to(device)
 
-        cam_extractor = SmoothGradCAMpp(model, target_layer='features', input_shape=(1, 224, 224))
-        try:
+        # Optimize SmoothGradCAMpp by using 1 sample instead of 4 (configurable via SMOOTHGRAD_SAMPLES)
+        # to eliminate 3 redundant forward/backward passes and minimize memory footprint while preserving heatmaps.
+        gradcam_samples = max(1, int(os.getenv("SMOOTHGRAD_SAMPLES", "1")))
+        cam_extractor = SmoothGradCAMpp(
+            model,
+            target_layer='features',
+            num_samples=gradcam_samples,
+            input_shape=(1, 224, 224)
+        )
+
+        with torch.enable_grad():
             output = model(input_tensor)
             cams = cam_extractor(class_idx=int(target_class_idx), scores=output)
             if not cams or len(cams) == 0:
                 logger.warning("Grad-CAM produced no activation maps")
                 return ""
-            cam = cams[0].squeeze().cpu().numpy()
-        finally:
-            cam_extractor.remove_hooks()
+            cam = cams[0].squeeze().detach().cpu().numpy()
 
         cam = cv2.resize(cam, (224, 224))
 
@@ -648,17 +674,42 @@ def generate_gradcam_overlay(model, input_tensor, image_pil, target_disease):
 
         heatmap = np.uint8(255 * cam)
         heatmap_color = cv2.applyColorMap(heatmap, cv2.COLORMAP_JET)
-        image_rgb = image_pil.convert('RGB').resize((224, 224))
-        image_bgr = cv2.cvtColor(np.array(image_rgb), cv2.COLOR_RGB2BGR)
+
+        # Efficient PIL to BGR conversion without redundant resizing if already (224, 224)
+        if image_pil.size != (224, 224):
+            image_resized = image_pil.convert('RGB').resize((224, 224))
+        else:
+            image_resized = image_pil.convert('RGB')
+        image_bgr = cv2.cvtColor(np.asarray(image_resized), cv2.COLOR_RGB2BGR)
+
         overlay = cv2.addWeighted(image_bgr, 0.6, heatmap_color, 0.4, 0)
 
-        _, buffer = cv2.imencode('.png', overlay)
+        # Fast PNG compression parameter
+        encode_params = [cv2.IMWRITE_PNG_COMPRESSION, 3]
+        success, buffer = cv2.imencode('.png', overlay, encode_params)
+        if not success:
+            logger.warning("Failed to encode Grad-CAM overlay image to PNG")
+            return ""
+
         gradcam_base64 = base64.b64encode(buffer).decode('utf-8')
         logger.info("Grad-CAM overlay generated successfully")
         return f"data:image/png;base64,{gradcam_base64}"
     except Exception as e:
         logger.warning("Grad-CAM overlay generation encountered an issue: %s", str(e))
         return ""
+    finally:
+        # Crucial memory cleanup: remove hooks, zero parameter gradients, free tensors and force gc
+        if cam_extractor is not None:
+            try:
+                cam_extractor.remove_hooks()
+            except Exception:
+                pass
+            del cam_extractor
+        try:
+            model.zero_grad(set_to_none=True)
+        except Exception:
+            pass
+        gc.collect()
 
 # Match symptoms to most likely diseases
 def predict_disease_from_symptoms(symptoms, df):
@@ -759,120 +810,140 @@ async def analyze_xray(
     # Always use verified authenticated UID as the authoritative user identity
     user_id = authenticated_uid
 
-    try:
-        logger.info("Received X-ray analysis request: authenticated_uid=%s, filename=%s", user_id, file.filename)
-        if file.content_type not in ['image/png', 'image/jpeg', 'image/jpg']:
-            logger.error("Invalid file type: %s", file.content_type)
-            raise HTTPException(status_code=422, detail="File must be PNG or JPEG")
+    # Concurrency control: serialize heavy model inference and Grad-CAM backprop to prevent memory spikes
+    async with inference_lock:
+        contents = None
+        input_tensor = None
+        image_pil = None
+        model_output = None
+        try:
+            logger.info("Received X-ray analysis request: authenticated_uid=%s, filename=%s", user_id, file.filename)
+            if file.content_type not in ['image/png', 'image/jpeg', 'image/jpg']:
+                logger.error("Invalid file type: %s", file.content_type)
+                raise HTTPException(status_code=422, detail="File must be PNG or JPEG")
 
-        contents = await file.read()
-        if len(contents) > 10 * 1024 * 1024:
-            logger.error("File content size too large: %s bytes", len(contents))
-            raise HTTPException(status_code=422, detail="File size must be under 10MB")
+            contents = await file.read()
+            if len(contents) > 10 * 1024 * 1024:
+                logger.error("File content size too large: %s bytes", len(contents))
+                raise HTTPException(status_code=422, detail="File size must be under 10MB")
 
-        # Upload file to Firebase Storage if bucket is configured
-        image_url = ""
-        if bucket is not None:
-            try:
-                logger.info("Uploading file to Firebase Storage")
-                safe_filename = f"{int(datetime.utcnow().timestamp())}_{file.filename}"
-                blob = bucket.blob(f"xrays/{user_id}/{safe_filename}")
-                download_token = str(uuid.uuid4())
-                blob.metadata = {"firebaseStorageDownloadTokens": download_token}
-                blob.upload_from_string(contents, content_type=file.content_type)
+            # Upload file to Firebase Storage if bucket is configured
+            image_url = ""
+            if bucket is not None:
+                try:
+                    logger.info("Uploading file to Firebase Storage")
+                    now_utc = datetime.now(timezone.utc)
+                    safe_filename = f"{int(now_utc.timestamp())}_{file.filename}"
+                    blob = bucket.blob(f"xrays/{user_id}/{safe_filename}")
+                    download_token = str(uuid.uuid4())
+                    blob.metadata = {"firebaseStorageDownloadTokens": download_token}
+                    blob.upload_from_string(contents, content_type=file.content_type)
 
-                bucket_name = bucket.name or storage_bucket_name
-                encoded_path = urllib.parse.quote(blob.name, safe='')
-                image_url = f"https://firebasestorage.googleapis.com/v0/b/{bucket_name}/o/{encoded_path}?alt=media&token={download_token}"
-                logger.info("File uploaded to %s", image_url)
-            except Exception as e:
-                logger.warning("Firebase Storage upload notice: %s; using data URL fallback", str(e))
+                    bucket_name = bucket.name or storage_bucket_name
+                    encoded_path = urllib.parse.quote(blob.name, safe='')
+                    image_url = f"https://firebasestorage.googleapis.com/v0/b/{bucket_name}/o/{encoded_path}?alt=media&token={download_token}"
+                    logger.info("File uploaded to %s", image_url)
+                except Exception as e:
+                    logger.warning("Firebase Storage upload notice: %s; using data URL fallback", str(e))
+                    b64_img = base64.b64encode(contents).decode('utf-8')
+                    image_url = f"data:{file.content_type};base64,{b64_img}"
+            else:
                 b64_img = base64.b64encode(contents).decode('utf-8')
                 image_url = f"data:{file.content_type};base64,{b64_img}"
-        else:
-            b64_img = base64.b64encode(contents).decode('utf-8')
-            image_url = f"data:{file.content_type};base64,{b64_img}"
 
-        # Retrieve cached model or load as fallback
-        model = model_state.get("model")
-        if model is None:
-            logger.info("Model not in memory cache, loading...")
-            model = load_model()
-            model_state["model"] = model
+            # Retrieve cached model or load as fallback
+            model = model_state.get("model")
+            if model is None:
+                logger.info("Model not in memory cache, loading...")
+                model = load_model()
+                model_state["model"] = model
 
-        is_pretrained = getattr(model, "_is_original_pretrained", True)
+            is_pretrained = getattr(model, "_is_original_pretrained", True)
 
-        input_tensor, image_pil = transform_image(BytesIO(contents))
-        pred_scores, model_output = predict_diseases(model, input_tensor)
+            input_tensor, image_pil = transform_image(BytesIO(contents))
+            pred_scores, model_output = predict_diseases(model, input_tensor)
 
-        radiographic_findings = get_radiographic_findings(pred_scores, is_pretrained=is_pretrained)
-        severity, recommendation, top_disease, top_score = determine_severity_and_recommendation(pred_scores, is_pretrained=is_pretrained)
+            radiographic_findings = get_radiographic_findings(pred_scores, is_pretrained=is_pretrained)
+            severity, recommendation, top_disease, top_score = determine_severity_and_recommendation(pred_scores, is_pretrained=is_pretrained)
 
-        # Correlated clinical symptoms for clinical context (for diseases exceeding operating thresholds)
-        detected_symptoms = []
-        for disease, score in pred_scores.items():
-            th = 0.50 if is_pretrained else DEFAULT_DISEASE_THRESHOLDS.get(disease, 0.5)
-            if score >= th and disease in symptom_map:
-                detected_symptoms += symptom_map[disease]
-        detected_symptoms = sorted(list(set(detected_symptoms)))
-        logger.info("Associated clinical symptoms for reference: %s", detected_symptoms)
+            # Correlated clinical symptoms for clinical context (for diseases exceeding operating thresholds)
+            detected_symptoms = []
+            for disease, score in pred_scores.items():
+                th = 0.50 if is_pretrained else DEFAULT_DISEASE_THRESHOLDS.get(disease, 0.5)
+                if score >= th and disease in symptom_map:
+                    detected_symptoms += symptom_map[disease]
+            detected_symptoms = sorted(list(set(detected_symptoms)))
+            logger.info("Associated clinical symptoms for reference: %s", detected_symptoms)
 
-        # Retrieve cached symptom DataFrame or load from CSV
-        df = model_state.get("symptom_df")
-        if df is None:
-            if not os.path.exists(csv_path):
-                csv_path = os.path.join(os.path.dirname(__file__), "lung_disease_symptoms.csv")
-            df = load_symptom_csv(csv_path)
-            model_state["symptom_df"] = df
+            # Retrieve cached symptom DataFrame or load from CSV
+            df = model_state.get("symptom_df")
+            if df is None:
+                if not os.path.exists(csv_path):
+                    csv_path = os.path.join(os.path.dirname(__file__), "lung_disease_symptoms.csv")
+                df = load_symptom_csv(csv_path)
+                model_state["symptom_df"] = df
 
-        final_prediction = predict_disease_from_symptoms(detected_symptoms, df) if detected_symptoms else {}
-        logger.info("Symptom correlation prediction: %s", final_prediction)
+            final_prediction = predict_disease_from_symptoms(detected_symptoms, df) if detected_symptoms else {}
+            logger.info("Symptom correlation prediction: %s", final_prediction)
 
-        # Generate Grad-CAM overlay for top detected pathology
-        logger.info("Top disease: %s, score: %s, severity: %s", top_disease, top_score, severity)
-        gradcam_image = generate_gradcam_overlay(model, input_tensor, image_pil, top_disease)
+            # Generate Grad-CAM overlay for top detected pathology
+            logger.info("Top disease: %s, score: %s, severity: %s", top_disease, top_score, severity)
+            gradcam_image = generate_gradcam_overlay(model, input_tensor, image_pil, top_disease)
 
-        # Persist to Firestore if available
-        doc_id = str(uuid.uuid4())
-        if db is not None:
-            try:
-                diagnosis_ref = db.collection("xray_diagnoses").document()
-                diagnosis_data = {
-                    "user_id": user_id,
-                    "image_url": image_url,
-                    "confidence": round(top_score * 100, 2),
-                    "findings": radiographic_findings,
-                    "associated_symptoms": detected_symptoms,
-                    "recommendation": recommendation,
-                    "severity": severity,
-                    "disease_probabilities": {k: round(float(v) * 100, 2) for k, v in pred_scores.items()},
-                    "symptom_predictions": final_prediction,
-                    "gradcam_image": gradcam_image,
-                    "created_at": firestore.SERVER_TIMESTAMP
-                }
-                diagnosis_ref.set(diagnosis_data)
-                doc_id = diagnosis_ref.id
-                logger.info("Stored X-ray diagnosis %s in Firestore for user %s", doc_id, user_id)
-            except Exception as e:
-                logger.warning("Firestore storage notice: %s", str(e))
+            # Persist to Firestore if available
+            doc_id = str(uuid.uuid4())
+            if db is not None:
+                try:
+                    diagnosis_ref = db.collection("xray_diagnoses").document()
+                    diagnosis_data = {
+                        "user_id": user_id,
+                        "image_url": image_url,
+                        "confidence": round(top_score * 100, 2),
+                        "findings": radiographic_findings,
+                        "associated_symptoms": detected_symptoms,
+                        "recommendation": recommendation,
+                        "severity": severity,
+                        "disease_probabilities": {k: round(float(v) * 100, 2) for k, v in pred_scores.items()},
+                        "symptom_predictions": final_prediction,
+                        "gradcam_image": gradcam_image,
+                        "created_at": firestore.SERVER_TIMESTAMP
+                    }
+                    diagnosis_ref.set(diagnosis_data)
+                    doc_id = diagnosis_ref.id
+                    logger.info("Stored X-ray diagnosis %s in Firestore for user %s", doc_id, user_id)
+                except Exception as e:
+                    logger.warning("Firestore storage notice: %s", str(e))
 
-        response_data = {
-            "xray_id": doc_id,
-            "image_url": image_url,
-            "confidence": round(top_score * 100, 2),
-            "findings": radiographic_findings,
-            "associated_symptoms": detected_symptoms,
-            "recommendation": recommendation,
-            "severity": severity,
-            "disease_probabilities": {k: round(float(v) * 100, 2) for k, v in pred_scores.items()},
-            "symptom_predictions": final_prediction,
-            "gradcam_image": gradcam_image,
-            "created_at": datetime.utcnow().isoformat()
-        }
-        return response_data
-    except HTTPException as e:
-        logger.error("HTTPException in analyze-xray: %s", str(e.detail))
-        raise e
-    except Exception as e:
-        logger.error("X-ray analysis failed for user_id=%s: %s", user_id, str(e), exc_info=True)
-        raise HTTPException(status_code=500, detail=f"X-ray analysis failed: {str(e)}")
+            response_data = {
+                "xray_id": doc_id,
+                "image_url": image_url,
+                "confidence": round(top_score * 100, 2),
+                "findings": radiographic_findings,
+                "associated_symptoms": detected_symptoms,
+                "recommendation": recommendation,
+                "severity": severity,
+                "disease_probabilities": {k: round(float(v) * 100, 2) for k, v in pred_scores.items()},
+                "symptom_predictions": final_prediction,
+                "gradcam_image": gradcam_image,
+                "created_at": datetime.now(timezone.utc).isoformat()
+            }
+            return response_data
+        except HTTPException as e:
+            logger.error("HTTPException in analyze-xray: %s", str(e.detail))
+            raise e
+        except Exception as e:
+            logger.error("X-ray analysis failed for user_id=%s: %s", user_id, str(e), exc_info=True)
+            raise HTTPException(status_code=500, detail=f"X-ray analysis failed: {str(e)}")
+        finally:
+            # Explicit cleanup of image buffers and temporary tensors to release memory
+            del contents
+            del input_tensor
+            del image_pil
+            del model_output
+            model = model_state.get("model")
+            if model is not None:
+                try:
+                    model.zero_grad(set_to_none=True)
+                except Exception:
+                    pass
+            gc.collect()
