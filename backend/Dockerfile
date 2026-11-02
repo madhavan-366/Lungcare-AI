@@ -27,7 +27,7 @@ RUN useradd -m -u 1000 user && \
 USER user
 ENV HOME=/home/user \
     PATH=/home/user/.local/bin:$PATH \
-    PORT=7860 \
+    PORT=8080 \
     PYTHONUNBUFFERED=1 \
     TORCH_HOME=/home/user/.cache/torch \
     TORCH_NUM_THREADS=1 \
@@ -44,8 +44,8 @@ RUN python -c "import torchxrayvision as xrv; xrv.models.get_weights('densenet12
 # Step 5: Copy backend application files with non-root ownership (custom checkpoints excluded via .dockerignore)
 COPY --chown=user:user . /home/user/app
 
-# Expose default Hugging Face Spaces port
-EXPOSE 7860
+# Expose standard Cloud Run port
+EXPOSE 8080
 
-# Bind to 0.0.0.0 and listen on dynamic $PORT (defaults to 7860 for Hugging Face Spaces)
-CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-7860}"]
+# Bind to 0.0.0.0 and listen on dynamic $PORT (defaults to 8080 for Cloud Run)
+CMD ["sh", "-c", "exec uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080}"]

@@ -1,6 +1,8 @@
 import axios from 'axios';
 
-export const RENDER_BACKEND_URL = 'https://lungcare-ai-backend-vkov.onrender.com';
+export const CLOUD_RUN_BACKEND_URL = 'https://lungcare-backend-843664194645.asia-south1.run.app';
+export const PROD_BACKEND_URL = CLOUD_RUN_BACKEND_URL;
+export const RENDER_BACKEND_URL = CLOUD_RUN_BACKEND_URL; // Deprecated alias pointing to new Google Cloud Run backend
 export const LOCAL_BACKEND_URL = 'http://localhost:8000';
 
 /**
@@ -8,19 +10,26 @@ export const LOCAL_BACKEND_URL = 'http://localhost:8000';
  * Automatically adapts between Local Development and Production Vercel environments:
  *
  * 1. If running in a browser on a deployed host (e.g. *.vercel.app or custom domain):
- *    - Always uses the live Render backend (https://lungcare-ai-backend-vkov.onrender.com)
+ *    - Uses VITE_API_URL or VITE_API_BASE_URL (defaults to Google Cloud Run backend:
+ *      https://lungcare-backend-843664194645.asia-south1.run.app)
  *      to strictly prevent net::ERR_CONNECTION_REFUSED to localhost.
  * 2. If running in a browser on localhost / 127.0.0.1:
- *    - Uses VITE_API_BASE_URL (defaults to http://localhost:8000).
+ *    - Uses VITE_API_URL or VITE_API_BASE_URL (defaults to http://localhost:8000).
  * 3. Fallback for SSR / Build time:
- *    - Uses VITE_API_BASE_URL or mode-based fallback.
+ *    - Uses VITE_API_URL or VITE_API_BASE_URL or mode-based fallback.
  */
 export const getApiBaseUrl = (): string => {
   const rawEnv = (
+    import.meta.env.VITE_API_URL ||
     import.meta.env.VITE_API_BASE_URL ||
     import.meta.env.VITE_BACKEND_URL ||
     ''
   ).trim();
+
+  // Guard against stale Render URL cached in environment variables
+  if (rawEnv && rawEnv.toLowerCase().includes('onrender.com')) {
+    return CLOUD_RUN_BACKEND_URL;
+  }
 
   const isBrowser = typeof window !== 'undefined';
   const isLocalhostHost =
@@ -32,9 +41,9 @@ export const getApiBaseUrl = (): string => {
 
   // 1. Deployed / Remote environment (e.g. Vercel deployment)
   if (isBrowser && !isLocalhostHost) {
-    // If env is missing or accidentally set to localhost, force production Render backend
+    // If env is missing or accidentally set to localhost, force production Cloud Run backend
     if (!rawEnv || rawEnv.includes('localhost') || rawEnv.includes('127.0.0.1')) {
-      return RENDER_BACKEND_URL;
+      return CLOUD_RUN_BACKEND_URL;
     }
     return rawEnv.replace(/\/+$/, '');
   }
@@ -48,7 +57,7 @@ export const getApiBaseUrl = (): string => {
   if (rawEnv) {
     return rawEnv.replace(/\/+$/, '');
   }
-  return import.meta.env.PROD ? RENDER_BACKEND_URL : LOCAL_BACKEND_URL;
+  return import.meta.env.PROD ? CLOUD_RUN_BACKEND_URL : LOCAL_BACKEND_URL;
 };
 
 export const API_BASE_URL = getApiBaseUrl();
@@ -91,7 +100,7 @@ export const getApiErrorMessage = (error: any): string => {
     if (isLocal) {
       return `Cannot connect to the local LungCare AI backend server at ${currentBaseUrl}. Please ensure your local backend is running (e.g., uvicorn main:app --reload on port 8000).`;
     }
-    return `Cannot reach the LungCare AI backend server at ${currentBaseUrl}. Please check your network connection or verify that the backend service is active on Render.`;
+    return `Cannot reach the LungCare AI backend server at ${currentBaseUrl}. Please check your network connection or verify that the backend service is active on Google Cloud Run.`;
   }
 
   // HTTP response error from backend (e.g. 400, 401, 422, 500)
