@@ -1,0 +1,87 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isParticipant(consultationId) {
+      let consultation = get(
+        /databases/$(database)/documents/consultations/$(consultationId)
+      ).data;
+
+      return signedIn() &&
+        (request.auth.uid == consultation.patient_id ||
+         request.auth.uid == consultation.doctor_id);
+    }
+
+    // User profiles
+    match /users/{userId} {
+      allow read: if signedIn();
+
+      allow create: if signedIn()
+                    && request.auth.uid == userId
+                    && request.resource.data.role in ['patient', 'doctor'];
+
+      allow update: if signedIn()
+                    && request.auth.uid == userId
+                    && request.resource.data.role == resource.data.role;
+
+      allow delete: if false;
+    }
+
+    // Consultation requests
+    match /consultations/{consultationId} {
+      allow read: if signedIn()
+                  && (request.auth.uid == resource.data.patient_id
+                      || request.auth.uid == resource.data.doctor_id);
+
+      allow create: if signedIn()
+                    && request.resource.data.patient_id == request.auth.uid
+                    && request.resource.data.status == 'pending'
+                    && request.resource.data.doctor_id is string;
+
+      allow update: if signedIn()
+                    && request.auth.uid == resource.data.doctor_id
+                    && resource.data.status == 'pending'
+                    && request.resource.data.status in ['accepted', 'rejected']
+                    && request.resource.data.patient_id == resource.data.patient_id
+                    && request.resource.data.doctor_id == resource.data.doctor_id
+                    && request.resource.data.diff(resource.data)
+                         .affectedKeys().hasOnly(['status', 'updated_at']);
+
+      allow delete: if false;
+    }
+
+    // Chat messages
+    match /messages/{messageId} {
+      allow read: if signedIn()
+                  && isParticipant(resource.data.consultation_id);
+
+      allow create: if signedIn()
+                    && request.resource.data.sender_id == request.auth.uid
+                    && request.resource.data.consultation_id is string
+                    && isParticipant(request.resource.data.consultation_id);
+
+      // Recipient can mark messages sent by the other participant as read
+      allow update: if signedIn()
+                    && isParticipant(resource.data.consultation_id)
+                    && resource.data.sender_id != request.auth.uid
+                    && request.resource.data.diff(resource.data)
+                         .affectedKeys().hasOnly(['read', 'read_at'])
+                    && request.resource.data.read == true;
+
+      allow delete: if false;
+    }
+
+    // X-ray diagnoses: backend writes using Firebase Admin SDK
+    match /xray_diagnoses/{diagnosisId} {
+      allow read: if signedIn()
+                  && request.auth.uid == resource.data.user_id;
+
+      allow write: if false;
+    }
+  }
+}

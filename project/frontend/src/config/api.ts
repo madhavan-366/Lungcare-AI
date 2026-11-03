@@ -68,7 +68,6 @@ export const API_BASE_URL = getApiBaseUrl();
 export const API_ENDPOINTS = {
   HEALTH: '/health',
   ANALYZE_XRAY: '/analyze-xray',
-  SEND_MESSAGE: '/send-message',
 } as const;
 
 /**

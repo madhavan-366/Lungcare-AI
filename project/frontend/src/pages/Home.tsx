@@ -26,7 +26,11 @@ import {
   Phone,
   Clock,
   Compass,
-  Cpu
+  Cpu,
+  Copy,
+  ExternalLink,
+  X,
+  FileText
 } from 'lucide-react';
 import Navbar from '../components/Navbar';
 import { HeroChestXrayVisual, FeatureScannerVisual, DoctorTeamVisual } from '../components/MedicalVisuals';
@@ -34,6 +38,37 @@ import { HeroChestXrayVisual, FeatureScannerVisual, DoctorTeamVisual } from '../
 const Home: React.FC = () => {
   const navigate = useNavigate();
   const [user, setUser] = useState<{ id: string; role?: 'patient' | 'doctor'; name?: string } | null>(null);
+  const [emailFeedback, setEmailFeedback] = useState<{ visible: boolean; message: string; copied: boolean }>({
+    visible: false,
+    message: '',
+    copied: false,
+  });
+
+  const handleEmailPlatformDesk = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const email = 'contact@lungcare.ai';
+    const subject = encodeURIComponent('LungCare AI Platform Support Desk Inquiry');
+    const body = encodeURIComponent(
+      'Hello LungCare Platform Support Team,\n\nI need assistance regarding:\n- User Account / Diagnostic Scans / Other:\n\nThank you,\n'
+    );
+    const mailtoUrl = `mailto:${email}?subject=${subject}&body=${body}`;
+
+    try {
+      window.location.href = mailtoUrl;
+    } catch (err) {
+      console.warn('Could not trigger system mailto directly:', err);
+    }
+
+    if (navigator?.clipboard?.writeText) {
+      navigator.clipboard.writeText(email).catch(() => {});
+    }
+
+    setEmailFeedback({
+      visible: true,
+      message: `Opening email client... (Copied ${email} to clipboard)`,
+      copied: true,
+    });
+  };
 
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged(async (currentUser) => {
@@ -235,43 +270,43 @@ const Home: React.FC = () => {
                 </div>
               </div>
 
-              {/* Card 4: Voice Calls */}
+              {/* Card 4: Clinical Diagnostic Reports */}
               <div className="glass-card rounded-2xl p-6 sm:p-7 flex flex-col justify-between group">
                 <div>
                   <div className="w-12 h-12 rounded-xl bg-emerald-600/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 mb-5 group-hover:scale-105 transition-transform">
-                    <PhoneCall className="h-6 w-6" />
+                    <FileText className="h-6 w-6" />
                   </div>
                   <h3 className="text-lg font-bold text-white mb-2 group-hover:text-cyan-300 transition-colors">
-                    Voice Calls
+                    Clinical Diagnostic Reports
                   </h3>
                   <p className="text-slate-300 text-sm leading-relaxed">
-                    Initiate telephone connections directly through verified clinical phone numbers on record. Seamlessly triggers your device’s native dialer to reach your attending doctor.
+                    Generate comprehensive clinical screening summaries with pathology probabilities, calibrated operating thresholds, and visual localization heatmaps for patient records.
                   </p>
                 </div>
                 <div className="mt-6 pt-4 border-t border-cyan-500/15">
                   <div className="text-xs font-medium text-slate-400 flex items-center space-x-1.5">
-                    <Phone className="w-3.5 h-3.5 text-emerald-400" />
-                    <span>Native telephone link integration</span>
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Instant PDF generation & history</span>
                   </div>
                 </div>
               </div>
 
-              {/* Card 5: Video Consultations (Truthful: Under Active Clinical Development) */}
+              {/* Card 5: Specialist Teleconsultations */}
               <div className="glass-card rounded-2xl p-6 sm:p-7 flex flex-col justify-between group">
                 <div>
                   <div className="w-12 h-12 rounded-xl bg-purple-600/20 border border-purple-500/30 flex items-center justify-center text-purple-400 mb-5 group-hover:scale-105 transition-transform">
                     <Video className="h-6 w-6" />
                   </div>
                   <h3 className="text-lg font-bold text-white mb-2 group-hover:text-cyan-300 transition-colors">
-                    Telehealth Consultations
+                    Specialist Teleconsultation
                   </h3>
                   <p className="text-slate-300 text-sm leading-relaxed">
-                    Direct physician communication is currently powered by real-time encrypted messaging and telephone linkage. Live WebRTC video visit streaming is planned for future releases.
+                    Direct physician communication powered by real-time encrypted messaging and radiographic document transmission. Connect directly with board-certified pulmonologists.
                   </p>
                 </div>
                 <div className="mt-6 pt-4 border-t border-cyan-500/15">
                   <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-semibold bg-purple-950/70 text-purple-300 border border-purple-500/30">
-                    Active via Chat & Phone
+                    Active via Encrypted Chat
                   </span>
                 </div>
               </div>
@@ -508,13 +543,59 @@ const Home: React.FC = () => {
                   </p>
                 </div>
                 <div>
-                  <a
-                    href="mailto:contact@lungcare.ai"
-                    className="w-full inline-flex items-center justify-center py-2.5 px-4 rounded-xl bg-navy-850 hover:bg-navy-800 text-cyan-300 border border-cyan-500/30 text-xs font-semibold transition"
+                  <button
+                    type="button"
+                    onClick={handleEmailPlatformDesk}
+                    className="w-full inline-flex items-center justify-center py-2.5 px-4 rounded-xl bg-navy-850 hover:bg-navy-800 text-cyan-300 border border-cyan-500/30 text-xs font-semibold transition active:scale-[0.98] shadow-sm"
                   >
-                    <Mail className="w-4 h-4 mr-2" />
-                    <span>Email Support Desk</span>
-                  </a>
+                    <Mail className="w-4 h-4 mr-2 text-cyan-400" />
+                    <span>Email Platform Desk</span>
+                  </button>
+
+                  {emailFeedback.visible && (
+                    <div className="mt-3 p-3 rounded-xl bg-navy-950/95 border border-cyan-500/40 text-xs text-cyan-200 animate-in fade-in duration-200 space-y-2 shadow-xl">
+                      <div className="flex items-start justify-between">
+                        <div className="flex items-center space-x-2">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+                          <span className="font-medium text-white">{emailFeedback.message}</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setEmailFeedback({ visible: false, message: '', copied: false })}
+                          className="text-slate-400 hover:text-white ml-2 p-0.5"
+                          title="Close notice"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                      <div className="flex flex-wrap gap-2 pt-1 border-t border-cyan-500/15 text-[11px]">
+                        <a
+                          href={`https://mail.google.com/mail/?view=cm&fs=1&to=contact@lungcare.ai&su=${encodeURIComponent(
+                            'LungCare AI Platform Support Inquiry'
+                          )}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="px-2.5 py-1 rounded-lg bg-navy-900 hover:bg-navy-850 border border-cyan-500/30 text-cyan-300 transition flex items-center gap-1 shadow-sm"
+                        >
+                          <ExternalLink className="w-3 h-3 text-cyan-400" />
+                          <span>Open in Gmail</span>
+                        </a>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (navigator?.clipboard?.writeText) {
+                              navigator.clipboard.writeText('contact@lungcare.ai');
+                            }
+                            alert('Copied contact@lungcare.ai to clipboard!');
+                          }}
+                          className="px-2.5 py-1 rounded-lg bg-navy-900 hover:bg-navy-850 border border-cyan-500/30 text-cyan-300 transition flex items-center gap-1 shadow-sm"
+                        >
+                          <Copy className="w-3 h-3 text-cyan-400" />
+                          <span>Copy Address</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 

@@ -54,6 +54,7 @@ const FindDoctor: React.FC = () => {
   const [notification, setNotification] = useState<string | null>(null);
   const [isLoadingDoctors, setIsLoadingDoctors] = useState(false);
   const [requestStatus, setRequestStatus] = useState<{ [doctorId: string]: 'pending' | 'accepted' | 'rejected' | null }>({});
+  const [consultationIds, setConsultationIds] = useState<{ [doctorId: string]: string }>({});
   const [isRequesting, setIsRequesting] = useState<{ [doctorId: string]: boolean }>({});
   const [searchTerm, setSearchTerm] = useState('');
 
@@ -126,11 +127,14 @@ const FindDoctor: React.FC = () => {
       );
       const unsubscribe = onSnapshot(consultationsQuery, (snapshot) => {
         const newRequestStatus: { [doctorId: string]: 'pending' | 'accepted' | 'rejected' | null } = {};
+        const newConsultationIds: { [doctorId: string]: string } = {};
         snapshot.docs.forEach((d) => {
           const consultation = d.data() as Consultation;
           newRequestStatus[consultation.doctor_id] = consultation.status;
+          newConsultationIds[consultation.doctor_id] = d.id;
         });
         setRequestStatus(newRequestStatus);
+        setConsultationIds(newConsultationIds);
       }, (err) => {
         console.error('Consultation Query Error:', err);
       });
@@ -306,7 +310,7 @@ const FindDoctor: React.FC = () => {
                   <div className="pt-3 border-t border-cyan-500/15">
                     {status === 'accepted' ? (
                       <button
-                        onClick={() => navigate('/patient-chats')}
+                        onClick={() => navigate(consultationIds[doc.id] ? `/chat/${consultationIds[doc.id]}` : '/patient-chats')}
                         className="w-full py-2.5 px-4 bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5"
                       >
                         <Check className="w-4 h-4" />

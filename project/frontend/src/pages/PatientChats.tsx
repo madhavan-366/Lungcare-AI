@@ -51,15 +51,20 @@ const PatientChats: React.FC = () => {
 
           const consultationsWithDoctors = await Promise.all(
             consultationsData.map(async (consultation) => {
-              const doctorDoc = await getDoc(doc(db, 'users', consultation.doctor_id));
-              const doctor = doctorDoc.exists()
-                ? {
-                    id: doctorDoc.id,
-                    name: doctorDoc.data().name || 'Specialist',
-                    specialization: doctorDoc.data().Specialization || doctorDoc.data().specialization || 'Pulmonology Specialist',
-                  }
-                : { id: consultation.doctor_id, name: 'Doctor' };
-              return { ...consultation, doctor };
+              try {
+                const doctorDoc = await getDoc(doc(db, 'users', consultation.doctor_id));
+                const doctor = doctorDoc.exists()
+                  ? {
+                      id: doctorDoc.id,
+                      name: doctorDoc.data().name || 'Specialist',
+                      specialization: doctorDoc.data().Specialization || doctorDoc.data().specialization || 'Pulmonology Specialist',
+                    }
+                  : { id: consultation.doctor_id, name: 'Doctor' };
+                return { ...consultation, doctor };
+              } catch (dErr) {
+                console.warn('Notice fetching doctor profile:', dErr);
+                return { ...consultation, doctor: { id: consultation.doctor_id, name: 'Doctor' } };
+              }
             })
           );
 

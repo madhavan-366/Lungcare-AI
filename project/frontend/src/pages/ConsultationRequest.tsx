@@ -185,6 +185,8 @@ const ConsultationRequest: React.FC = () => {
           sender_name: user.name,
           content: `Hello ${item?.patient?.name || 'there'}, Dr. ${user.name} has accepted your consultation request. How can I help you today?`,
           timestamp: new Date(),
+          read: false,
+          read_at: null,
         });
         setNotification('Consultation accepted! Direct communication channel opened.');
         setTimeout(() => navigate('/doctor-chats'), 1200);

@@ -1,5 +1,5 @@
 import React, { Component } from 'react';
-import { BrowserRouter as Router, Routes, Route, useLocation } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import Home from './pages/Home';
 import Login from './pages/Login';
 import Signup from './pages/Signup';
@@ -11,26 +11,8 @@ import ConsultationRequests from './pages/ConsultationRequest';
 import DoctorChats from './pages/DoctorChats';
 import Chat from './pages/Chat';
 import PatientChats from './pages/PatientChats';
-import VoiceCall from './pages/VoiceCall';
 import ForgotPassword from './pages/ForgotPassword';
 import ProfileSetup from './ProfileSetup';
-import ChatbotWidget from './components/ChatBotWidget';
-
-// Error Boundary for ChatBotWidget
-class ChatbotErrorBoundary extends Component<{ children: React.ReactNode }, { hasError: boolean }> {
-  state = { hasError: false };
-
-  static getDerivedStateFromError() {
-    return { hasError: true };
-  }
-
-  render() {
-    if (this.state.hasError) {
-      return null; // Silently hide widget on error
-    }
-    return this.props.children;
-  }
-}
 
 // Global Application Error Boundary
 interface AppErrorBoundaryState {
@@ -87,35 +69,22 @@ class AppErrorBoundary extends Component<{ children: React.ReactNode }, AppError
 }
 
 const AppLayout: React.FC = () => {
-  const location = useLocation();
-  const showChatbot = !location.pathname.match(/^\/chat\/[^/]+$/);
-
-  console.log('AppLayout: location.pathname =', location.pathname, 'showChatbot =', showChatbot);
-
   return (
-    <>
-      <Routes>
-        <Route path="/" element={<Home />} />
-        <Route path="/login" element={<Login />} />
-        <Route path="/signup" element={<Signup />} />
-        <Route path="/forgot-password" element={<ForgotPassword />} />
-        <Route path="/profile-setup" element={<ProfileSetup />} />
-        <Route path="/patient-dashboard" element={<PatientDashboard />} />
-        <Route path="/doctor-dashboard" element={<DoctorDashboard />} />
-        <Route path="/xray" element={<XrayAnalysis />} />
-        <Route path="/find-doctor" element={<FindDoctor />} />
-        <Route path="/consultation-requests" element={<ConsultationRequests />} />
-        <Route path="/doctor-chats" element={<DoctorChats />} />
-        <Route path="/patient-chats" element={<PatientChats />} />
-        <Route path="/chat/:consultationId" element={<Chat />} />
-        <Route path="/voice-call/:consultationId" element={<VoiceCall />} />
-      </Routes>
-      {showChatbot && (
-        <ChatbotErrorBoundary>
-          <ChatbotWidget />
-        </ChatbotErrorBoundary>
-      )}
-    </>
+    <Routes>
+      <Route path="/" element={<Home />} />
+      <Route path="/login" element={<Login />} />
+      <Route path="/signup" element={<Signup />} />
+      <Route path="/forgot-password" element={<ForgotPassword />} />
+      <Route path="/profile-setup" element={<ProfileSetup />} />
+      <Route path="/patient-dashboard" element={<PatientDashboard />} />
+      <Route path="/doctor-dashboard" element={<DoctorDashboard />} />
+      <Route path="/xray" element={<XrayAnalysis />} />
+      <Route path="/find-doctor" element={<FindDoctor />} />
+      <Route path="/consultation-requests" element={<ConsultationRequests />} />
+      <Route path="/doctor-chats" element={<DoctorChats />} />
+      <Route path="/patient-chats" element={<PatientChats />} />
+      <Route path="/chat/:consultationId" element={<Chat />} />
+    </Routes>
   );
 };
 

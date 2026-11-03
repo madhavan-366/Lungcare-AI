@@ -1,0 +1,24 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    
+    // Consultation attachments (images, medical PDFs up to 5MB)
+    match /consultation_files/{consultationId}/{fileName} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null
+                    && request.resource.size <= 5 * 1024 * 1024
+                    && (request.resource.contentType.matches('image/.*')
+                        || request.resource.contentType == 'application/pdf');
+      allow delete: if request.auth != null;
+    }
+
+    // Radiograph scans uploaded by authenticated users (up to 10MB)
+    match /xrays/{userId}/{fileName} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && request.auth.uid == userId
+                    && request.resource.size <= 10 * 1024 * 1024;
+      allow delete: if false;
+    }
+  }
+}
